@@ -13,7 +13,6 @@
    [instant.db.model.triple :as triple-model]
    [instant.db.permissioned-transaction :as permissioned-tx]
    [instant.db.transaction :as tx]
-   [instant.flags :as flags]
    [instant.fixtures :refer [with-empty-app with-zeneca-app]]
    [instant.jdbc.aurora :as aurora]
    [instant.model.app :as app-model]
@@ -911,6 +910,51 @@
         (is (= #{[stopa-eid fav-nickname-attr-id "Stopa"]
                  [joe-eid fav-nickname-attr-id "Joski"]
                  [stopa-eid likes-attr-id joe-eid]}
+               (fetch-triples app-id)))))))
+
+(deftest delete-entity-cleans-references
+  (with-empty-app
+    (fn [{app-id :id}]
+      (let [board-id-attr-id (UUID/randomUUID)
+            node-id-attr-id (UUID/randomUUID)
+            board-nodes-attr-id (UUID/randomUUID)
+            ex-board (UUID/randomUUID)
+            ex-node (UUID/randomUUID)]
+        (tx/transact!
+         aurora/conn-pool
+         (attr-model/get-by-app-id aurora/conn-pool app-id)
+         app-id
+         [[:add-attr {:id board-id-attr-id
+                      :forward-identity [(UUID/randomUUID) "boards" "id"]
+                      :value-type :blob
+                      :cardinality :one
+                      :unique? false
+                      :index? false}]
+          [:add-attr {:id node-id-attr-id
+                      :forward-identity [(UUID/randomUUID) "nodes" "id"]
+                      :value-type :blob
+                      :cardinality :one
+                      :unique? false
+                      :index? false}]
+          [:add-attr {:id board-nodes-attr-id
+                      :forward-identity [(UUID/randomUUID) "boards" "nodes"]
+                      :reverse-identity [(UUID/randomUUID) "nodes" "board"]
+                      :value-type :ref
+                      :cardinality :many
+                      :unique? true
+                      :index? false}]
+          [:add-triple ex-board board-id-attr-id ex-board]
+          [:add-triple ex-node node-id-attr-id ex-node]
+          [:add-triple ex-board board-nodes-attr-id ex-node]])
+        (is (= #{[ex-board board-id-attr-id (str ex-board)]
+                 [ex-node node-id-attr-id (str ex-node)]
+                 [ex-board board-nodes-attr-id ex-node]}
+               (fetch-triples app-id)))
+        (tx/transact! aurora/conn-pool
+                      (attr-model/get-by-app-id aurora/conn-pool app-id)
+                      app-id
+                      [[:delete-entity ex-node "nodes"]])
+        (is (= #{[ex-board board-id-attr-id (str ex-board)]}
                (fetch-triples app-id)))))))
 
 (comment
@@ -1891,8 +1935,7 @@
         (app-user-model/create! aurora/conn-pool {:app-id app-id
                                                   :id user-id
                                                   :email "test@example.com"})
-        (with-redefs [flags/run-view-checks? (constantly true)]
-          (perm-err? (permissioned-tx/transact! (make-ctx) tx-steps)))
+        (perm-err? (permissioned-tx/transact! (make-ctx) tx-steps))
         (is (permissioned-tx/transact! (assoc (make-ctx)
                                               :current-user {:id user-id}) tx-steps))))))
 
@@ -1945,8 +1988,7 @@
                        book-creator-attr-id
                        [(resolvers/->uuid r :$users/email) "test@example.com"]]]]
 
-        (with-redefs [flags/run-view-checks? (constantly true)]
-          (perm-err? (permissioned-tx/transact! (make-ctx) tx-steps)))
+        (perm-err? (permissioned-tx/transact! (make-ctx) tx-steps))
         (permissioned-tx/transact! (assoc (make-ctx)
                                           :current-user {:id user-id}) tx-steps)
         (is (= (pretty-perm-q

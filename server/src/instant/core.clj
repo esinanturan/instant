@@ -104,7 +104,7 @@
                          {:host "0.0.0.0"
                           :port (config/get-server-port)
                           :configurator (fn [^Undertow$Builder builder]
-                                          (.setServerOption builder UndertowOptions/ENABLE_STATISTICS true ))}))
+                                          (.setServerOption builder UndertowOptions/ENABLE_STATISTICS true))}))
   (def stop-gauge (gauges/add-gauge-metrics-fn
                    (fn []
                      (let [^Undertow server server
@@ -125,9 +125,9 @@
                            :value (.getMaxProcessingTime stats)}]))))))
 
 (defn stop []
-  (when (bound? (resolve 'server))
+  (when (bound? #'server)
     (.stop ^Undertow server))
-  (when (bound? (resolve 'stop-gauge))
+  (when (bound? #'stop-gauge)
     (stop-gauge)))
 
 (defn restart []
